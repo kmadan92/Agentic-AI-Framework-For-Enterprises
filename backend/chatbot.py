@@ -7,35 +7,25 @@ if root not in sys.path:
     sys.path.insert(0, root)
 
 from langchain_core.messages import HumanMessage
-from langchain_openai import AzureChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 import asyncio
 import os
 import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import Command
 from langchain.agents import create_agent
+from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 # load environment variables from .env (endpoint, key, deployment, version)
 load_dotenv()
 
-# require deployment and version to be set
-azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
-if not azure_deployment:
-    raise RuntimeError("AZURE_OPENAI_DEPLOYMENT must be set in .env")
-
-api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-if not api_version:
-    raise RuntimeError("AZURE_OPENAI_API_VERSION must be set in .env")
-
-# instantiate Azure chat model
-llm = AzureChatOpenAI(
-    azure_deployment=azure_deployment,
-    api_version=api_version,
-    # additional params like temperature, max_tokens are optional
+# instantiate Gemini model (API key loaded from GOOGLE_API_KEY in .env)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
     temperature=0.1
 )
-
 
 async def setup_async_graph():
     
@@ -56,17 +46,29 @@ async def setup_async_graph():
     
     # 2. Fetch tools. The client handles the connection temporarily under the hood.
     tools = await mcp_client.get_tools()
-    
-    # Build the agent
-    return create_agent(llm, tools, checkpointer=saver)
+
+    # Build the agent with HITL middleware — approve/reject before write_db runs
+    return create_agent(
+        llm,
+        tools,
+        checkpointer=saver,
+        middleware=[
+            HumanInTheLoopMiddleware(
+                interrupt_on={
+                    "write_db": {"allowed_decisions": ["approve", "reject"]},
+                    "run_node_test": False,
+                }
+            ),
+        ],
+    )
 
 async def run_test():
     print("Initializing Multi-Server MCP Client...")
 
-    
     try:
         chatbot = await setup_async_graph()
-            
+        config = {"configurable": {"thread_id": "tesd878hhh987hjh8969cjfncjjdch654647554"}}
+
         while True:
 
             user_input = input("\n You: ")
@@ -76,14 +78,43 @@ async def run_test():
 
             final_state = await chatbot.ainvoke(
                 {"messages": [HumanMessage(content=user_input)]},
-                config={"configurable": {"thread_id": "test_mdjcdjc87i8jdch654647554"}}
+                config=config
             )
 
-            final_ai_text = final_state["messages"][-1]
-            print(f"AI: {final_ai_text}")
+            # Check state AFTER ainvoke to detect HITL interrupt
+            snapshot = await chatbot.aget_state(config)
+
+            if snapshot.interrupts:
+                interrupt_val = snapshot.interrupts[0].value
+                action = interrupt_val["action_requests"][0]
+                allowed = interrupt_val["review_configs"][0]["allowed_decisions"]
+
+                print(f"\n[APPROVAL REQUIRED]")
+                print(f"  {action['description']}")
+                print(f"  Enter one of: {allowed}")
+                decision = input("  Your decision: ").strip().lower()
+
+                final_state = await chatbot.ainvoke(
+                Command(resume={"decisions": [{"type": decision}]}),
+                config=config
+                )
+
+            # --- Graph State ---
+            print("\n" + "="*50)
+            print("GRAPH STATE:")
+            print(f"  Total messages in thread : {len(final_state['messages'])}")
+            for i, msg in enumerate(final_state["messages"]):
+                role = msg.__class__.__name__.replace("Message", "")
+                content_preview = str(msg.content)[:120] + ("..." if len(str(msg.content)) > 120 else "")
+                print(f"  [{i}] {role}: {content_preview}")
+            print("="*50)
+
+            # --- AI Response ---
+            final_ai_text = final_state["messages"][-1].content
+            print(f"\nAI: {final_ai_text}\n")
 
         print("\n\n[Stream finished successfully!]")
-        
+
     finally:
         print("Database connection closed.")
 

@@ -11,6 +11,8 @@ if root not in sys.path:
 import chainlit as cl
 from backend.chatbot import setup_async_graph
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
+from langgraph.errors import GraphInterrupt
 import chainlit.data as cl_data
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 
@@ -128,7 +130,33 @@ async def main(message):
 
         # # Finalize the message
         await msg.update()
-        
+
+    except GraphInterrupt as e:
+        # HITL: write_db triggered an interrupt — show Approve / Reject buttons
+        interrupt_val = e.interrupts[0].value if e.interrupts else {}
+
+        action_res = await cl.AskActionMessage(
+            content=f"**Approval Required**\n\n{interrupt_val}",
+            actions=[
+                cl.Action(name="approve", payload={"value": "approve"}, label="✅ Approve"),
+                cl.Action(name="reject",  payload={"value": "reject"},  label="❌ Reject"),
+            ],
+        ).send()
+
+        decision = action_res["payload"]["value"] if action_res else "reject"
+
+        # Resume the graph and stream the final response
+        msg = cl.Message(content="")
+        await msg.send()
+        async for chunk, metadata in chatbot.astream(
+            Command(resume=decision),
+            config={"configurable": {"thread_id": thread_id}},
+            stream_mode="messages",
+        ):
+            if chunk.content and "AIMessageChunk" in chunk.__class__.__name__:
+                await msg.stream_token(chunk.content)
+        await msg.update()
+
     except Exception as e:
         reply_text = f"Error invoking chatbot: {e}"
         print("chatbot invocation error:", e)
