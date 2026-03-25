@@ -7,7 +7,7 @@ if root not in sys.path:
     sys.path.insert(0, root)
 
 from langchain_core.messages import HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import asyncio
 import os
@@ -16,14 +16,16 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
+from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.sessions import Connection
 
 # load environment variables from .env (endpoint, key, deployment, version)
 load_dotenv()
 
-# instantiate Gemini model (API key loaded from GOOGLE_API_KEY in .env)
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+# instantiate OpenAI model (API key loaded from OPENAI_API_KEY in .env)
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
     temperature=0.1
 )
 
@@ -33,7 +35,7 @@ async def setup_async_graph():
     conn = await aiosqlite.connect("checkpoints.sqlite")
     saver = AsyncSqliteSaver(conn=conn)
 
-    CLIENT_CONFIG = {
+    CLIENT_CONFIG: dict[str, Connection] = {
        "run_node_test": {
             "transport": "stdio",
             "command": "python", 
@@ -67,9 +69,9 @@ async def run_test():
 
     try:
         chatbot = await setup_async_graph()
-        thread_id = "t7736r7ijfrgytd746cjjdch654647554"
-        config = {"configurable": {"thread_id": thread_id},
-                  "run_name": thread_id}
+        thread_id = "t7736r7ijfrgyt7rhjfhj54647554"
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id},
+                                   "run_name": thread_id}
 
         while True:
 
@@ -80,11 +82,11 @@ async def run_test():
 
             final_state = await chatbot.ainvoke(
                 {"messages": [HumanMessage(content=user_input)]},
-                config=config
+                config=config 
             )
 
             # Check state AFTER ainvoke to detect HITL interrupt
-            snapshot = await chatbot.aget_state(config)
+            snapshot = await chatbot.aget_state(config) 
 
             if snapshot.interrupts:
                 interrupt_val = snapshot.interrupts[0].value
@@ -118,7 +120,7 @@ async def run_test():
 
                 final_state = await chatbot.ainvoke(
                 Command(resume={"decisions": [resume_decision]}),
-                config=config
+                config=config # type: ignore
                 )
 
             # --- Graph State ---
