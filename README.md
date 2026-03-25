@@ -360,16 +360,59 @@ Never commit API keys or local databases.
 
 ------------------------------------------------------------------------
 
-# Future Improvements
+# Future Improvements & Enterprise Readiness
 
-Planned enhancements:
+## Current Limitations for Enterprise Use
 
--   PostgreSQL checkpoint storage for production
--   Vector memory for long-term recall
--   Additional MCP tools
--   Retrieval-Augmented Generation (RAG)
--   Rate limiting and usage tracking
--   Container or cloud deployment
+This platform is currently suitable for prototyping and internal pilots.
+The following gaps prevent production-grade enterprise deployment:
+
+| Area | Current State | Enterprise Requirement |
+|---|---|---|
+| **Database** | SQLite (file-based, single-process) | PostgreSQL / managed cloud DB |
+| **Authentication** | Google OAuth only | SSO / SAML / Azure AD / LDAP |
+| **WebSocket Scaling** | Single-node Chainlit | Sticky sessions or pub/sub layer for multi-node |
+
+------------------------------------------------------------------------
+
+##  Enhancements Guide for Enterprise Use
+
+### Infrastructure
+-   Replace SQLite with **PostgreSQL** for checkpoints and chat history
+-   Containerise with **Docker** and orchestrate with **Kubernetes**
+
+### Scalability & Reliability
+-   Horizontally scalable agent workers (stateless + shared checkpoint store)
+-   Retry logic and circuit breakers for LLM and tool calls
+-   Queue-backed tool execution for long-running MCP operations
+-   WebSocket pub/sub layer for multi-node Chainlit deployments
+
+> **WebSocket Scaling Note:** Chainlit uses WebSockets to push real-time
+> streaming tokens to the browser. Each user's browser holds an open
+> WebSocket connection to a specific Chainlit server process. If multiple
+> Chainlit instances run behind a load balancer, a user's request may hit
+> Server A but their WebSocket stream may be routed to Server B — which
+> has no knowledge of that connection, causing the stream to drop.
+>
+> Moving to PostgreSQL solves the **database** concurrency problem but does
+> **not** fix WebSocket routing — they are independent concerns. To fully
+> scale horizontally you also need one of:
+>
+> | Solution | How it works | Complexity |
+> |---|---|---|
+> | **Sticky sessions** | Load balancer always routes the same user to the same server (by cookie/IP) | Low — load balancer config only |
+> | **Redis pub/sub adapter** | All Chainlit instances share a Redis message bus; any instance can serve any user's WebSocket | Medium — add Redis + configure adapter |
+
+### Agent & AI Capabilities
+-   **Vector memory** for long-term semantic recall across sessions
+-   **Retrieval-Augmented Generation (RAG)** over internal knowledge bases
+-   Additional MCP tool servers (databases, APIs, file systems, SaaS integrations)
+-   Multi-agent orchestration — specialised sub-agents per domain
+-   Agent evaluation framework with automated regression testing
+
+### Observability
+-   LLM cost tracking and token usage alerts
+-   HITL decision analytics and approval rate reporting
 
 ------------------------------------------------------------------------
 
