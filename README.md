@@ -365,7 +365,7 @@ Never commit API keys or local databases.
 ## Current Limitations for Enterprise Use
 
 This platform is currently suitable for prototyping and internal pilots.
-The following gaps prevent production-grade enterprise deployment:
+The following things which will vary from enterprise to enterprise will be needed to be implemented for production-grade enterprise deployment:
 
 | Area | Current State | Enterprise Requirement |
 |---|---|---|
