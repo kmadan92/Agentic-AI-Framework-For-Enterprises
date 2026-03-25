@@ -23,7 +23,7 @@ load_dotenv()
 
 # instantiate Gemini model (API key loaded from GOOGLE_API_KEY in .env)
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
+    model="gemini-2.0-flash",
     temperature=0.1
 )
 
@@ -55,7 +55,7 @@ async def setup_async_graph():
         middleware=[
             HumanInTheLoopMiddleware(
                 interrupt_on={
-                    "write_db": {"allowed_decisions": ["approve", "reject"]},
+                    "write_db": {"allowed_decisions": ["approve", "edit", "reject"]},
                     "run_node_test": False,
                 }
             ),
@@ -67,7 +67,7 @@ async def run_test():
 
     try:
         chatbot = await setup_async_graph()
-        thread_id = "t7736r7ijfrgv75cjfncjjdch654647554"
+        thread_id = "t7736r7ijfrgytd746cjjdch654647554"
         config = {"configurable": {"thread_id": thread_id},
                   "run_name": thread_id}
 
@@ -96,8 +96,28 @@ async def run_test():
                 print(f"  Enter one of: {allowed}")
                 decision = input("  Your decision: ").strip().lower()
 
+                if decision == "edit":
+                    # Show current args and let user provide updated values
+                    print(f"  Current args: {action['args']}")
+                    new_message = input("  Enter new message for write_db: ").strip()
+                    resume_decision = {
+                        "type": "edit",
+                        "edited_action": {
+                            "name": action["name"],
+                            "args": {"message": new_message},
+                        },
+                    }
+                elif decision == "reject":
+                    reason = input("  Reason for rejection (optional, press Enter to skip): ").strip()
+                    resume_decision = {"type": "reject"}
+                    if reason:
+                        resume_decision["message"] = reason
+                        print(f"  Rejection recorded: \"{reason}\"")
+                else:
+                    resume_decision = {"type": decision}
+
                 final_state = await chatbot.ainvoke(
-                Command(resume={"decisions": [{"type": decision}]}),
+                Command(resume={"decisions": [resume_decision]}),
                 config=config
                 )
 
@@ -114,7 +134,6 @@ async def run_test():
             # --- AI Response ---
             final_ai_text = final_state["messages"][-1].content
             print(f"\nAI: {final_ai_text}\n")
-            print(final_state)
 
         print("\n\n[Stream finished successfully!]")
 
